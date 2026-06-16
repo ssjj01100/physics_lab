@@ -740,7 +740,7 @@
     S.id = 'orbit'; S.stars = []; S.bodies = []; S.G = 1; S.timeScale = 1;
     S.starCount = 2; S.selected = null; S.bodyInteract = false;
     let drag = null, dragStar = null, dragBody = null;
-    const STAR_M = 4.0e6, SOFT = 12;
+    const STAR_M = 4.0e6, STAR_SOFT = 3, BODY_SOFT = 12;
 
     function placeStars() {
       S.stars = [];
@@ -762,12 +762,12 @@
     function accel(bx, by, self) {
       let ax = 0, ay = 0;
       for (const s of S.stars) {
-        const dx = s.x - bx, dy = s.y - by, r2 = dx * dx + dy * dy + SOFT * SOFT;
+        const dx = s.x - bx, dy = s.y - by, r2 = dx * dx + dy * dy + STAR_SOFT * STAR_SOFT;
         const inv = S.G * s.m / (r2 * Math.sqrt(r2)); ax += dx * inv; ay += dy * inv;
       }
       if (S.bodyInteract) for (const o of S.bodies) {
         if (o === self) continue;
-        const dx = o.x - bx, dy = o.y - by, r2 = dx * dx + dy * dy + SOFT * SOFT;
+        const dx = o.x - bx, dy = o.y - by, r2 = dx * dx + dy * dy + BODY_SOFT * BODY_SOFT;
         const inv = S.G * o.m * 60 / (r2 * Math.sqrt(r2)); ax += dx * inv; ay += dy * inv;
       }
       return [ax, ay];
@@ -776,9 +776,11 @@
       const h = 1 / 240; let t = Math.min(dt * S.timeScale, 1 / 20), g = 0;
       while (t > 0 && g++ < 800) {
         const s = Math.min(h, t); t -= s;
-        for (const b of S.bodies) { const [ax, ay] = accel(b.x, b.y, b); b.vx += ax * s; b.vy += ay * s; }
+        // 속도 베를레(velocity Verlet): 심플렉틱 2차 → 에너지 보존이 좋아 세차가 거의 없음
+        for (const b of S.bodies) { const a = accel(b.x, b.y, b); b._ax = a[0]; b._ay = a[1]; }
+        for (const b of S.bodies) { b.x += b.vx * s + 0.5 * b._ax * s * s; b.y += b.vy * s + 0.5 * b._ay * s * s; }
+        for (const b of S.bodies) { const a = accel(b.x, b.y, b); b.vx += 0.5 * (b._ax + a[0]) * s; b.vy += 0.5 * (b._ay + a[1]) * s; }
         for (const b of S.bodies) {
-          b.x += b.vx * s; b.y += b.vy * s;
           for (const st of S.stars) if (dist(b.x, b.y, st.x, st.y) < st.r) b._dead = true;
           if (b.x < -400 || b.x > W + 400 || b.y < -400 || b.y > H + 400) b._dead = true;
         }
@@ -843,15 +845,23 @@
       return { vx: tx * k * vCirc, vy: ty * k * vCirc, star };
     }
     // 예측 궤도 적분 (별들만 고려)
+    function starAccel(x, y) {
+      let ax = 0, ay = 0;
+      for (const s of S.stars) {
+        const ddx = s.x - x, ddy = s.y - y, r2 = ddx * ddx + ddy * ddy + STAR_SOFT * STAR_SOFT;
+        const inv = S.G * s.m / (r2 * Math.sqrt(r2)); ax += ddx * inv; ay += ddy * inv;
+      }
+      return [ax, ay];
+    }
     function predictPath(px, py, vx, vy) {
-      let x = px, y = py; const pts = [x, y], h = 1 / 120;
+      let x = px, y = py; const h = 1 / 120;
+      let a = starAccel(x, y), ax = a[0], ay = a[1];
+      const pts = [x, y];
       for (let i = 0; i < 620; i++) {
-        let ax = 0, ay = 0;
-        for (const s of S.stars) {
-          const ddx = s.x - x, ddy = s.y - y, r2 = ddx * ddx + ddy * ddy + SOFT * SOFT;
-          const inv = S.G * s.m / (r2 * Math.sqrt(r2)); ax += ddx * inv; ay += ddy * inv;
-        }
-        vx += ax * h; vy += ay * h; x += vx * h; y += vy * h;
+        x += vx * h + 0.5 * ax * h * h; y += vy * h + 0.5 * ay * h * h;
+        const a2 = starAccel(x, y);
+        vx += 0.5 * (ax + a2[0]) * h; vy += 0.5 * (ay + a2[1]) * h;
+        ax = a2[0]; ay = a2[1];
         if (i % 3 === 0) pts.push(x, y);
         let hit = false; for (const s of S.stars) if (dist(x, y, s.x, s.y) < s.r) hit = true;
         if (hit || x < -300 || x > W + 300 || y < -300 || y > H + 300) break;
