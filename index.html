@@ -797,33 +797,90 @@
         if (S.playing) arrow(b.x, b.y, b.x + b.vx * 0.18, b.y + b.vy * 0.18, hexA(b.color, 0.65));
       }
       if (drag) {
+        // 기준 별까지 보조선
+        if (drag.star) {
+          ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
+          ctx.beginPath(); ctx.moveTo(drag.x, drag.y); ctx.lineTo(drag.star.x, drag.star.y); ctx.stroke();
+          ctx.setLineDash([]); ctx.restore();
+        }
+        // 예측 궤도 경로
+        if (drag.path && drag.path.length > 4) {
+          ctx.save(); ctx.strokeStyle = 'rgba(69,199,224,0.6)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 5]); ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(drag.path[0], drag.path[1]);
+          for (let i = 2; i < drag.path.length; i += 2) ctx.lineTo(drag.path[i], drag.path[i + 1]);
+          ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+        }
+        // 속도 화살표 + 위치 점
+        arrow(drag.x, drag.y, drag.x + drag.vx * 0.18, drag.y + drag.vy * 0.18, '#45c7e0');
         glowDot(drag.x, drag.y, 6, '#45c7e0', false);
-        arrow(drag.x, drag.y, drag.cx, drag.cy, '#45c7e0');
-        const sp = Math.hypot(drag.cx - drag.x, drag.cy - drag.y) * 2;
+        const sp = Math.hypot(drag.vx, drag.vy);
         ctx.fillStyle = '#8a98ad'; ctx.font = '11px monospace';
         ctx.fillText('v = ' + fmt(sp, 0) + ' px/s', drag.x + 12, drag.y - 8);
       }
     };
     const hitStar = (x, y) => S.stars.find(s => dist(x, y, s.x, s.y) < s.r + 8);
     const hitBody = (x, y) => S.bodies.find(b => dist(x, y, b.x, b.y) < b.r + 9);
+    const nearestStar = (x, y) => {
+      let best = null, bd = Infinity;
+      for (const s of S.stars) { const d = dist(x, y, s.x, s.y); if (d < bd) { bd = d; best = s; } }
+      return best;
+    };
+    // 누른 위치 + 드래그 → 가장 가까운 별 기준 접선(원궤도) 속도. 충돌·이탈 없도록 자동 보정.
+    function computeVel(px, py, dx, dy) {
+      const star = nearestStar(px, py);
+      if (!star) return { vx: dx * 2, vy: dy * 2, star: null };
+      let rx = px - star.x, ry = py - star.y, r = Math.hypot(rx, ry);
+      if (r < star.r + 6) r = star.r + 6;
+      const tx = -ry / r, ty = rx / r;                 // 접선(반시계) 단위벡터
+      const vCirc = Math.sqrt(S.G * star.m / r);        // 원궤도 속도
+      const dragT = (dx * tx + dy * ty) * 2;            // 드래그의 접선 성분 = 목표 속도
+      let k = dragT / vCirc, sign = k >= 0 ? 1 : -1, mag = Math.abs(k);
+      const q = star.r + 14;
+      const kmin = Math.sqrt(2 * q / (r + q));          // 근지점이 별 밖에 있도록
+      if (mag < 0.12) { sign = 1; mag = 1.0; }          // 거의 안 끌면 원궤도(반시계) 기본
+      mag = clamp(mag, kmin, 1.22);                     // 탈출속도(√2)·과대궤도 방지
+      k = sign * mag;
+      return { vx: tx * k * vCirc, vy: ty * k * vCirc, star };
+    }
+    // 예측 궤도 적분 (별들만 고려)
+    function predictPath(px, py, vx, vy) {
+      let x = px, y = py; const pts = [x, y], h = 1 / 120;
+      for (let i = 0; i < 620; i++) {
+        let ax = 0, ay = 0;
+        for (const s of S.stars) {
+          const ddx = s.x - x, ddy = s.y - y, r2 = ddx * ddx + ddy * ddy + SOFT * SOFT;
+          const inv = S.G * s.m / (r2 * Math.sqrt(r2)); ax += ddx * inv; ay += ddy * inv;
+        }
+        vx += ax * h; vy += ay * h; x += vx * h; y += vy * h;
+        if (i % 3 === 0) pts.push(x, y);
+        let hit = false; for (const s of S.stars) if (dist(x, y, s.x, s.y) < s.r) hit = true;
+        if (hit || x < -300 || x > W + 300 || y < -300 || y > H + 300) break;
+      }
+      return pts;
+    }
     S.pointerDown = function (p) {
       const st = hitStar(p.x, p.y); if (st) { dragStar = st; return; }
       const b = hitBody(p.x, p.y);
       if (b) { S.selected = b; refreshList(); if (!S.playing) dragBody = b; return; }
-      drag = { x: p.x, y: p.y, cx: p.x, cy: p.y };
+      const v = computeVel(p.x, p.y, 0, 0);
+      drag = { x: p.x, y: p.y, cx: p.x, cy: p.y, vx: v.vx, vy: v.vy, star: v.star, path: predictPath(p.x, p.y, v.vx, v.vy) };
     };
     S.pointerMove = function (p) {
       if (dragStar) { dragStar.x = p.x; dragStar.y = p.y; return; }
       if (dragBody) { dragBody.x = p.x; dragBody.y = p.y; dragBody.trail.length = 0; return; }
-      if (drag) { drag.cx = p.x; drag.cy = p.y; }
+      if (drag) {
+        drag.cx = p.x; drag.cy = p.y;
+        const v = computeVel(drag.x, drag.y, p.x - drag.x, p.y - drag.y);
+        drag.vx = v.vx; drag.vy = v.vy; drag.star = v.star;
+        drag.path = predictPath(drag.x, drag.y, v.vx, v.vy);
+      }
     };
     S.pointerUp = function () {
       if (dragStar) { dragStar = null; return; }
       if (dragBody) { dragBody = null; return; }
       if (drag) {
-        const vx = (drag.cx - drag.x) * 2, vy = (drag.cy - drag.y) * 2;
         const color = PALETTE[S.bodies.length % PALETTE.length];
-        const b = { x: drag.x, y: drag.y, vx, vy, m: 1, r: 6, color, trail: [], name: '행성 ' + (S.bodies.length + 1) };
+        const b = { x: drag.x, y: drag.y, vx: drag.vx, vy: drag.vy, m: 1, r: 6, color, trail: [], name: '행성 ' + (S.bodies.length + 1) };
         S.bodies.push(b); S.selected = b; drag = null; refreshList();
       }
     };
@@ -847,7 +904,7 @@
           <div class="readout"><div class="rk">중심까지 거리</div><div class="rv" id="o-td">–<span class="unit">px</span></div></div>
         </div>
       </div>
-      <div class="note">${ICONS.info}<div><b>조작법:</b> 빈 공간을 누른 채 끌면 화살표 방향·길이로 <b>초기 속도</b>가 정해진 물체가 생깁니다. 손을 떼면 배치 완료 — <b>시작</b>을 누르세요. 별·물체는 드래그로 옮길 수 있습니다.</div></div>`;
+      <div class="note">${ICONS.info}<div><b>조작법:</b> 빈 공간을 누르면 그 자리에 행성이 놓이고 <b>가장 가까운 별 기준 원궤도</b>가 점선으로 미리 보입니다. 누른 채 끌면 끄는 <b>방향·세기</b>로 궤도 모양이 바뀝니다(별로 빨려들거나 튕겨나가지 않도록 자동 보정). 손을 떼면 배치 완료 — <b>시작</b>을 누르세요. 별·행성은 드래그로 옮길 수 있습니다.</div></div>`;
     function refreshList() {
       const el = $('#o-list'); if (!el) return; el.innerHTML = '';
       S.bodies.forEach((b, i) => {
