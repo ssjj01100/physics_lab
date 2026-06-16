@@ -297,7 +297,29 @@
     border-radius: 5px;
     min-width: 44px;
     text-align: center;
+    cursor: pointer;
+    transition: background 0.12s;
   }
+  .field-row .val:hover { background: rgba(69, 199, 224, 0.22); }
+  .field-row .val.editing { padding: 1px; background: transparent; }
+  .field-row .val input.val-edit {
+    width: 52px;
+    box-sizing: border-box;
+    background: var(--bg);
+    border: 1px solid var(--accent-dim);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    text-align: center;
+    border-radius: 4px;
+    padding: 1px 0;
+    outline: none;
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  .field-row .val input.val-edit::-webkit-outer-spin-button,
+  .field-row .val input.val-edit::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
   input[type="range"] {
     -webkit-appearance: none;
@@ -1235,7 +1257,8 @@
      ======================================================================= */
   const Collision = (function () {
     const S = new BaseSim();
-    S.id = 'collision'; S.balls = []; S.e = 1.0; S.gravity = 0; S.timeScale = 1;
+    S.id = 'collision'; S.balls = []; S.e = 1.0; S.gravity = 1; S.timeScale = 1;
+    const G_EARTH = 700; // 1.00 g = 지구 중력가속도(9.8 m/s²) ≈ 700 px/s²
     let drag = null;
     const PAD = 0; // walls at canvas edge
 
@@ -1266,7 +1289,7 @@
       const h = 1 / 240; let tt = Math.min(dt * S.timeScale, 1 / 20), gd = 0;
       while (tt > 0 && gd++ < 800) {
         const s = Math.min(h, tt); tt -= s;
-        for (const b of S.balls) { b.vy += S.gravity * s; b.x += b.vx * s; b.y += b.vy * s; collideWalls(b); }
+        for (const b of S.balls) { b.vy += S.gravity * G_EARTH * s; b.x += b.vx * s; b.y += b.vy * s; collideWalls(b); }
         for (let i = 0; i < S.balls.length; i++) for (let j = i + 1; j < S.balls.length; j++) collidePair(S.balls[i], S.balls[j]);
       }
       S.time += dt * S.timeScale;
@@ -1311,7 +1334,7 @@
     S.panelHTML = `
       <div class="group"><div class="group-label">충돌 설정</div>
         <div class="field"><div class="field-row"><label>반발 계수 e</label><span class="val" id="c-e-v">1.00</span></div><input type="range" id="c-e" min="0" max="1" step="0.05" value="1"></div>
-        <div class="field"><div class="field-row"><label>중력</label><span class="val" id="c-g-v">0</span></div><input type="range" id="c-g" min="0" max="800" step="20" value="0"></div>
+        <div class="field"><div class="field-row"><label>중력</label><span class="val" id="c-g-v">1.00 g</span></div><input type="range" id="c-g" min="0" max="3" step="0.05" value="1"></div>
         <div class="field"><div class="field-row"><label>시간 속도</label><span class="val" id="c-ts-v">1.0×</span></div><input type="range" id="c-ts" min="0.2" max="3" step="0.1" value="1"></div>
       </div>
       ${transportHTML()}
@@ -1321,7 +1344,7 @@
           <div class="readout wide"><div class="rk">총 운동에너지 ΣKE</div><div class="rv" id="c-ke">0.0</div></div>
         </div>
       </div>
-      <div class="note">${ICONS.info}<div><b>조작법:</b> 빈 공간을 <b>끌어 공을 발사</b>하세요(끄는 길이=속도, 공 크기=질량). <b>e=1</b>이면 완전탄성(에너지 보존), <b>e=0</b>이면 완전비탄성입니다. 운동량은 항상 보존됩니다.</div></div>`;
+      <div class="note">${ICONS.info}<div><b>조작법:</b> 빈 공간을 <b>끌어 공을 발사</b>하세요(끄는 길이=속도, 공 크기=질량). <b>e=1</b>이면 완전탄성(에너지 보존), <b>e=0</b>이면 완전비탄성입니다. 중력 <b>1.00 g</b>는 지구 중력가속도이며, 중력을 0으로 두면 공끼리 충돌에서 운동량이 보존됩니다.</div></div>`;
     S.tickPanel = function () {
       const T = totals(); const pe = $('#c-p'), ke = $('#c-ke');
       if (pe) pe.textContent = fmt(T.p / 1000, 2) + 'k';
@@ -1329,7 +1352,7 @@
     };
     S.bind = function (root) {
       const bs = (id, prop, lab) => { const s = $('#' + id, root), v = $('#' + id + '-v', root); s.addEventListener('input', () => { S[prop] = +s.value; v.textContent = lab ? lab(+s.value) : s.value; }); };
-      bs('c-e', 'e', v => v.toFixed(2)); bs('c-g', 'gravity'); bs('c-ts', 'timeScale', v => v.toFixed(1) + '×');
+      bs('c-e', 'e', v => v.toFixed(2)); bs('c-g', 'gravity', v => v.toFixed(2) + ' g'); bs('c-ts', 'timeScale', v => v.toFixed(1) + '×');
     };
     return S;
   })();
@@ -1493,6 +1516,38 @@
     $('.btn-play', div) && $('.btn-play', div).addEventListener('click', () => sim.play());
     $('.btn-pause', div) && $('.btn-pause', div).addEventListener('click', () => sim.pause());
     $('.btn-reset', div) && $('.btn-reset', div).addEventListener('click', () => sim.reset());
+  });
+
+  /* 슬라이더 수치(.val) 클릭 → 직접 입력. 해당 슬라이더의 min~max 범위로 자동 제한 */
+  panelsRoot.addEventListener('click', e => {
+    const val = e.target.closest('.val');
+    if (!val || !val.id || !val.id.endsWith('-v') || val.querySelector('input')) return;
+    const slider = document.getElementById(val.id.slice(0, -2));
+    if (!slider || slider.type !== 'range') return;
+    const prev = val.textContent;
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.className = 'val-edit';
+    inp.value = slider.value; inp.min = slider.min; inp.max = slider.max; inp.step = slider.step;
+    val.classList.add('editing');
+    val.textContent = ''; val.appendChild(inp);
+    inp.focus(); inp.select();
+    let done = false;
+    const finish = (apply) => {
+      if (done) return; done = true;
+      val.classList.remove('editing');
+      if (apply && inp.value !== '' && isFinite(+inp.value)) {
+        slider.value = Math.min(+slider.max, Math.max(+slider.min, +inp.value));
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        if (val.querySelector('input')) val.textContent = slider.value; // 포맷터 미적용 시 보정
+      } else {
+        val.textContent = prev;
+      }
+    };
+    inp.addEventListener('blur', () => finish(true));
+    inp.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+    });
   });
 
   function updateTransport() {
