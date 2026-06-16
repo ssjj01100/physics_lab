@@ -738,7 +738,7 @@
   const Orbit = (function () {
     const S = new BaseSim();
     S.id = 'orbit'; S.stars = []; S.bodies = []; S.G = 1; S.timeScale = 1;
-    S.starCount = 2; S.selected = null; S.bodyInteract = false;
+    S.starCount = 2; S.selected = null; S.bodyInteract = false; S.trailKeep = false;
     let drag = null, dragStar = null, dragBody = null;
     const STAR_M = 4.0e6, STAR_SOFT = 3, BODY_SOFT = 12;
 
@@ -786,12 +786,22 @@
         }
       }
       if (S.bodies.some(b => b._dead)) { S.bodies = S.bodies.filter(b => !b._dead); refreshList(); }
-      for (const b of S.bodies) { b.trail.push(b.x, b.y); if (b.trail.length > 360) b.trail.splice(0, b.trail.length - 360); }
+      const trailCap = S.trailKeep ? 30000 : 360;
+      for (const b of S.bodies) { b.trail.push(b.x, b.y); if (b.trail.length > trailCap) b.trail.splice(0, b.trail.length - trailCap); }
       S.time += dt * S.timeScale;
     };
     S.draw = function () {
       drawGrid();
-      for (const b of S.bodies) polyTrail(b.trail, b.color, 0.5);
+      for (const b of S.bodies) {
+        if (S.trailKeep) {
+          if (b.trail.length > 4) {
+            ctx.save(); ctx.strokeStyle = hexA(b.color, 0.5); ctx.lineWidth = 1.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.beginPath(); ctx.moveTo(b.trail[0], b.trail[1]);
+            for (let i = 2; i < b.trail.length; i += 2) ctx.lineTo(b.trail[i], b.trail[i + 1]);
+            ctx.stroke(); ctx.restore();
+          }
+        } else polyTrail(b.trail, b.color, 0.5);
+      }
       for (const s of S.stars) glowDot(s.x, s.y, s.r, s.color, true);
       for (const b of S.bodies) {
         glowDot(b.x, b.y, b.r, b.color, false);
@@ -905,6 +915,7 @@
         <div class="field"><div class="field-row"><label>중력 상수 G</label><span class="val" id="o-G-v">1.0×</span></div><input type="range" id="o-G" min="0.2" max="3" step="0.1" value="1"></div>
         <div class="field"><div class="field-row"><label>시간 속도</label><span class="val" id="o-ts-v">1.0×</span></div><input type="range" id="o-ts" min="0.2" max="4" step="0.1" value="1"></div>
         <div class="check-row"><label>물체 간 인력</label><div class="switch" id="o-bi"><div class="knob"></div></div></div>
+        <div class="check-row"><label>트레일 유지</label><div class="switch" id="o-tk"><div class="knob"></div></div></div>
       </div>
       ${transportHTML()}
       <div class="group"><div class="group-label">물체 관리</div><div class="obj-list" id="o-list"></div></div>
@@ -943,6 +954,8 @@
       ts.addEventListener('input', () => { S.timeScale = +ts.value; tsv.textContent = (+ts.value).toFixed(1) + '×'; });
       const bi = $('#o-bi', root);
       bi.addEventListener('click', () => { S.bodyInteract = !S.bodyInteract; bi.classList.toggle('on', S.bodyInteract); });
+      const tk = $('#o-tk', root);
+      tk.addEventListener('click', () => { S.trailKeep = !S.trailKeep; tk.classList.toggle('on', S.trailKeep); });
       refreshList();
     };
     return S;
